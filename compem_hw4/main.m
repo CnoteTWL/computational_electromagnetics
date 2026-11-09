@@ -3,13 +3,18 @@ close all; clear all; clc;
 cfg = setupParameters();
 phi = (0:0.1:359.9) * pi/180; %every angle sweep
 % 1 = PEC TMz, 2 = PEC TEz, 3 = dielectric TMz, 4 = dielectric TEz
-for caseID = 1:4
+%for caseID = 1:4
+caseID = 1;
     geometry = makeCircleGeometry(cfg.a, cfg.N);
     solution = MoM(geometry, cfg, caseID);
+    fields = nearField(solution, geometry, cfg, caseID);
+    plotFields(cfg, fields, caseID);
     echo = solveEchoWidth(solution, geometry, cfg, phi);
     Aecho = analyticalEchoWidth(cfg, phi, cfg.N, caseID);
-    error = sqrt(sum((echo(:)-Aecho(:))).^2) ./ Aecho(:);%rmse calculation
-end
+    plotEcho(cfg, echo, Aecho);
+    error = sqrt(trapz(cfg.phi, (echo(:)-Aecho(:))).^2) ./ trapz(cfg.phi, Aecho(:));%rmse calculation
+    monostatic = interp1(cfg.phi,echo,pi);%monostatic echo width
+%end
 
 
 function cfg = setupParameters()
@@ -29,10 +34,7 @@ function cfg = setupParameters()
     cfg.circumference = pi*cfg.lambda0;
     cfg.N = 400;
     cfg.numharmonics = 50;
-    % cfg.hmax = cfg.lambda0/30;
-    % cfg.phi = linspace(0,2*pi,361);
-    % cfg.Rc = cfg.a+cfg.lambda0/4; % Far field integration contour
-    % cfg.Nc = 1440;
+    cfg.phi = linspace(0,2*pi,361);
 end
 
 function geom = makeCircleGeometry(a,N)
@@ -138,3 +140,44 @@ function aEcho = analyticalEchoWidth(cfg, phi, N, caseID) %N may be wrong
     aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
 end
 
+function field = nearField(solution, geometry, cfg, caseID)
+    x = linspace(-0.06, 0.06, 151);
+    [X, Y] = meshgrid(x,x);
+    Einc = exp(-1j*cfg.k0*X);
+    Escat = zeros(size(X));
+    Etot = Escat;
+    in = inpolygon(X,Y, geometry.xv, geometry.yv) %returns in or on if in or on edge of polygon
+    out = ~in;
+    if caseID == 1 || caseID == 3 %check TM
+        wavenum = cfg.kd;
+    else
+        wavenum = cfg.k0;
+    end
+    [G0, D0] = greenStart(X(out), Y(out), geometry, wavenum);
+    Escat(out) = -(G0 * solution.q - D0 * solution.E);
+    Etot(out) = Einc(out) + Escat(out);
+    field.Et = Etot;
+end
+
+function plotEcho(cfg, echo, Aecho)
+plot(cfg.phi*180/pi, echo, 'b-', cfg.phi*180/pi, Aecho, 'r--');
+xlabel('\phi (deg)'); 
+ylabel('Echo width (m)');
+legend('MoM', 'Analytical'); 
+title('Bistatic Echo Width')
+grid on;
+end
+
+function plotFields(cfg, fields, caseID)
+    imagesc(linspace(-0.06,0.06,size(fields.Et,2)), ...
+        linspace(-0.06,0.06,size(fields.Et,1)), abs(fields.Et));
+    axis equal tight; 
+    cb = colorbar;
+    xlabel('x (m)'); ylabel('y (m)');
+    title('Field Magnitude');
+    if caseID == 1 || caseID == 3
+        cb.Label.String = 'Re(E_z) [V/m]';
+    else
+        cb.Label.String = 'Re(H_z) [A/m]';
+    end
+end
