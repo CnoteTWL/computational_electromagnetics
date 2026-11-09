@@ -6,20 +6,27 @@ phi = (0:0.1:359.9) * pi/180; %every angle sweep
 for caseID = 1:4
     geometry = makeCircleGeometry(cfg.a, cfg.N);
     solution = MoM(geometry, cfg, caseID);
+    echo = solveEchoWidth(solution, geometry, cfg, phi);
+    Aecho = analyticalEchoWidth(cfg, phi, cfg.N, caseID);
+    error = sqrt(sum((echo(:)-Aecho(:))).^2) ./ Aecho(:);%rmse calculation
 end
 
 
 function cfg = setupParameters()
     cfg.f0 = 10e9;
-    cfg.c0 = 1/sqrt(pi*4e-7*8.85e-12);
+    u0 = pi*4e-7;
+    e0 = 8.85e-12;
+    cfg.c0 = 1/sqrt(u0*e0);
+    cfg.eta0 = sqrt(u0/e0);
     cfg.a = 0.015;
-    cfg.epsilonR = 9;
+    cfg.eR = 9;
     cfg.muR = 1;
     cfg.lambda0 = cfg.c0/cfg.f0;
-    cfg.lambdaD = cfg.lambda0/sqrt(epsilonR);
+    cfg.lambdaD = cfg.lambda0/sqrt(cfg.eR);
     cfg.k0 = 2*pi/cfg.lambda0;
+    cfg.kd = 2*pi/cfg.lambdaD;
     cfg.R = cfg.a+cfg.lambda0;
-    cfg.circumference = pi*lambda0;
+    cfg.circumference = pi*cfg.lambda0;
     cfg.N = 400;
     cfg.numharmonics = 50;
     % cfg.hmax = cfg.lambda0/30;
@@ -40,23 +47,23 @@ function geom = makeCircleGeometry(a,N)
     geom.nx = dy./geom.length; %calculates x component of outward unit normal vector
     geom.ny = -dx./geom.length;
     geom.xv = xv; %geom. here is unnecessary but more compact
-    geom.yv = yh;
+    geom.yv = yv;
     geom.N = N;
 end
 
 function [G, D] = greenStart(x0, y0, geometry, k)
-DX = x0(:) - geometry.xm.';
-DY = y0(:) - geometry.ym.';
+DX = x0(:) - geometry.xmid.';
+DY = y0(:) - geometry.ymid.';
 R = hypot(DX, DY);
-G = (geometry.L.'/(4j)) .* besselh(0, 2, k*R); %green's fn at zero, bessel function is of 2nd kind
-D = (k*geometry.L.'/(4j)) .* besselh(1, 2, k*R) .* (geometry.nx.' .* DX + geometry.ny.' .*DY) ./ R; %dirac zero
+G = (geometry.length.'/(4j)) .* besselh(0, 2, k*R); %green's fn at zero, bessel function is of 2nd kind
+D = (k*geometry.length.'/(4j)) .* besselh(1, 2, k*R) .* (geometry.nx.' .* DX + geometry.ny.' .*DY) ./ R; %dirac zero
 end
 
 function [G, D] = createGreens(geometry, k)
     [G, D] = greenStart(geometry.xmid, geometry.ymid, geometry, k);
     gamma = exp(0.577);
     d = 1:geometry.N+1:geometry.N^2;
-    G(d) = geometry.L/(4j) .* (1 - 1j*(2/pi)*log(gamma*k*geometry.L/(4*exp(1))));
+    G(d) = geometry.length/(4j) .* (1 - 1j*(2/pi)*log(gamma*k*geometry.length/(4*exp(1))));
     D(d) = 0;
 end
 
@@ -66,7 +73,7 @@ function solution = MoM(geometry, cfg, caseID)
     Einc = exp(-1j*cfg.k0*geometry.xmid); %incident field of all midpoints
     beta = 1;
     if caseID == 2 || caseID == 4 %checks if TE
-        beta = cfg.epsr;
+        beta = cfg.eR;
     end
     [G, D] = createGreens(geometry, cfg.k0);
     if caseID == 1 || caseID == 2 %checks if PEC
@@ -94,5 +101,40 @@ function solution = MoM(geometry, cfg, caseID)
     if caseID == 2 || caseID == 4
         solution.J_t = -E;
     end
+end
+
+function echo = solveEchoWidth(solution, geometry, cfg, phi)
+cs = cos(phi(:)).';
+ss = sin(phi(:)).';
+nr = geometry.nx*cs + geometry.ny*ss; %phases needed
+%phase = exp(1j*cfg.k0*(geometry.xmid*cs + geometry.ymid*ss)); unnecessary
+F = sum(geometry.length .* (solution.q - 1j*nr .* solution.E));
+echo = abs(F) .^2 / 4*cfg.k0;
+end
+
+function aEcho = analyticalEchoWidth(cfg, phi, N, caseID) %N may be wrong
+    n = -N:N;
+    x = cfg.k0*cfg.a;
+    J = besselj(n,x);
+    H = besselh(n, 2, x);
+    Js = 0.5*(besselj(n-1,x) - besselj(n+1,x));
+    Hs = 0.5*(besselh(n-1,2,x) - besselh(n+1,2,x));
+    if caseID == 1 || caseID == 2 %check PEC
+        if caseID == 1 || caseID == 3 %check TM
+            coeffM = -J ./ H;
+        else
+            coeffM = -Js ./ Hs;
+        end
+    else
+        xd = cfg.kd*cfg.a; %dielectric case
+        Jd = besselj(n, xd);
+        Jds = 0.5*(besselj(n-1, xd) - besselj(n+1, xd));
+        es = sqrt(cfg.eR);
+        if caseID == 2 || caseID == 4 %check TE
+            es = 1/es;
+        end
+        coeffM = -(Js .* Jd - es*J.*Jds) ./ (Hs.*Jd - es*H.*Jds);
+    end
+    aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
 end
 
