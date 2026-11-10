@@ -4,16 +4,16 @@ cfg = setupParameters();
 phi = (0:0.1:359.9) * pi/180; %every angle sweep
 % 1 = PEC TMz, 2 = PEC TEz, 3 = dielectric TMz, 4 = dielectric TEz
 %for caseID = 1:4
-caseID = 1;
+caseID = 4;
     geometry = makeCircleGeometry(cfg.a, cfg.N);
     solution = MoM(geometry, cfg, caseID);
     fields = nearField(solution, geometry, cfg, caseID);
     plotFields(cfg, fields, caseID);
     echo = solveEchoWidth(solution, geometry, cfg, phi);
     Aecho = analyticalEchoWidth(cfg, phi, cfg.N, caseID);
-    plotEcho(cfg, echo, Aecho);
-    error = sqrt(trapz(cfg.phi, (echo(:)-Aecho(:))).^2) ./ trapz(cfg.phi, Aecho(:));%rmse calculation
-    monostatic = interp1(cfg.phi,echo,pi);%monostatic echo width
+    plotEcho(phi, echo, Aecho);
+    error = sqrt(trapz(phi, (echo(:)-Aecho(:))).^2) ./ trapz(phi, Aecho(:));%rmse calculation
+    monostatic = interp1(phi,echo,pi);%monostatic echo width
 %end
 
 
@@ -109,9 +109,9 @@ function echo = solveEchoWidth(solution, geometry, cfg, phi)
 cs = cos(phi(:)).';
 ss = sin(phi(:)).';
 nr = geometry.nx*cs + geometry.ny*ss; %phases needed
-%phase = exp(1j*cfg.k0*(geometry.xmid*cs + geometry.ymid*ss)); unnecessary
-F = sum(geometry.length .* (solution.q - 1j*nr .* solution.E));
-echo = abs(F) .^2 / 4*cfg.k0;
+phase = exp(1j*cfg.k0*(geometry.xmid*cs + geometry.ymid*ss));
+F = sum(geometry.length .* (solution.q - 1j*nr .* solution.E) .* phase, 1);
+echo = abs(F) .^2 / (4*cfg.k0);
 end
 
 function aEcho = analyticalEchoWidth(cfg, phi, N, caseID) %N may be wrong
@@ -137,7 +137,9 @@ function aEcho = analyticalEchoWidth(cfg, phi, N, caseID) %N may be wrong
         end
         coeffM = -(Js .* Jd - es*J.*Jds) ./ (Hs.*Jd - es*H.*Jds);
     end
-    aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
+    %aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
+    S = exp(1j*phi(:)*n) * coeffM.';
+    aEcho = (4/cfg.k0) * abs(phi);
 end
 
 function field = nearField(solution, geometry, cfg, caseID)
@@ -159,8 +161,9 @@ function field = nearField(solution, geometry, cfg, caseID)
     field.Et = Etot;
 end
 
-function plotEcho(cfg, echo, Aecho)
-plot(cfg.phi*180/pi, echo, 'b-', cfg.phi*180/pi, Aecho, 'r--');
+function plotEcho(phi, echo, Aecho)
+figure;
+plot(phi(:)*180/pi, echo, 'b-', phi(:)*180/pi, Aecho, 'r--');
 xlabel('\phi (deg)'); 
 ylabel('Echo width (m)');
 legend('MoM', 'Analytical'); 
@@ -169,6 +172,7 @@ grid on;
 end
 
 function plotFields(cfg, fields, caseID)
+    figure;
     imagesc(linspace(-0.06,0.06,size(fields.Et,2)), ...
         linspace(-0.06,0.06,size(fields.Et,1)), abs(fields.Et));
     axis equal tight; 
