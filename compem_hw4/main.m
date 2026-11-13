@@ -3,8 +3,8 @@ close all; clear all; clc;
 cfg = setupParameters();
 phi = (0:0.1:359.9) * pi/180; %every angle sweep
 % 1 = PEC TMz, 2 = PEC TEz, 3 = dielectric TMz, 4 = dielectric TEz
-%for caseID = 1:4
-caseID = 2;
+for caseID = 1:4
+%caseID = 3;
     geometry = makeCircleGeometry(cfg.a, cfg.N);
     solution = MoM(geometry, cfg, caseID);
     fields = nearField(solution, geometry, cfg, caseID);
@@ -14,7 +14,7 @@ caseID = 2;
     plotEcho(phi, echo, Aecho);
     error = sqrt(trapz(phi, (echo(:)-Aecho(:))).^2) ./ trapz(phi, Aecho(:));%rmse calculation
     monostatic = interp1(phi,echo,pi);%monostatic echo width
-%end
+end
 
 
 function cfg = setupParameters()
@@ -63,7 +63,7 @@ end
 
 function [G, D] = createGreens(geometry, k) %make interaction matricies
     [G, D] = greenStart(geometry.xmid, geometry.ymid, geometry, k);
-    gamma = exp(0.577); %constant
+    gamma = exp(0.577); %Euler constant
     d = 1:geometry.N+1:geometry.N^2; %diagonal
     G(d) = geometry.length/(4j) .* (1 - 1j*(2/pi)*log(gamma*k*geometry.length/(4*exp(1))));
     D(d) = 0;
@@ -72,8 +72,17 @@ end
 function solution = MoM(geometry, cfg, caseID) %solves boundary integral equations
     N = geometry.N;
     I = eye(N); %identity matrix
-    Einc = exp(-1j*cfg.k0*geometry.xmid); %incident field of all midpoints
+    Einc = exp(-1j*cfg.k0*geometry.xmid); %incident field of all midpoints, H field in TE case
+    er = 1;
+    if caseID == 2 || caseID == 4
+        er = 9;
+    end
     [G, D] = createGreens(geometry, cfg.k0);
+    A = [0.5*I - D, G;
+        0.5*I + D, -er.*G];
+    x = A \ [Einc; zeros(N,1)];
+    E = x(1:N);
+    q = x(N+1:end);
     if caseID == 1 || caseID == 2 %checks if PEC
         if caseID == 1 || caseID == 3 %checks if TM
             q = G \ Einc; %dEz/dn
@@ -83,15 +92,6 @@ function solution = MoM(geometry, cfg, caseID) %solves boundary integral equatio
             q = zeros(N,1);
         end
     end
-    er = 1;
-    if caseID == 2 || caseID == 4
-        er = 9;
-    end
-    A = [0.5*I - D, G;
-        0.5*I + D, -er.*G];
-    x = A \ [Einc; zeros(N,1)];
-    E = x(1:N);
-    q = x(N+1:end);
     %wrap outputs
     solution.E = E;
     solution.q = q;
@@ -163,10 +163,15 @@ function field = nearField(solution, geometry, cfg, caseID)
     Escat(out) = -(G0 * solution.q - D0 * solution.E);
     Etot(out) = Einc(out) + Escat(out);
     if caseID >= 3 %check Dielectric
+        if caseID == 4 %TE
+            qFac = cfg.eR;
+        else
+            qFac = 1;
+        end
         [Gd, Dd] = greenStart(X(in_boundary), Y(in_boundary), geometry, cfg.kd);
-        Etot(in_boundary)  = cfg.eR * 3 * (Gd * qb) - (Dd * Eb);
+        Etot(in_boundary)  = 0.5*qFac*(Gd*qb) - (Dd*Eb);
         Escat(in_boundary) = Etot(in_boundary) - Einc(in_boundary);
-    else
+        else
         Etot(in) = 0;
         Escat(in) = -Einc(in);
     end
