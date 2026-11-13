@@ -1,16 +1,16 @@
 close all; clear all; clc;
-
+%currently 2 works
 cfg = setupParameters();
 phi = (0:0.1:359.9) * pi/180; %every angle sweep
 % 1 = PEC TMz, 2 = PEC TEz, 3 = dielectric TMz, 4 = dielectric TEz
 %for caseID = 1:4
-caseID = 4;
+caseID = 2;
     geometry = makeCircleGeometry(cfg.a, cfg.N);
     solution = MoM(geometry, cfg, caseID);
     fields = nearField(solution, geometry, cfg, caseID);
     plotFields(cfg, fields, caseID);
     echo = solveEchoWidth(solution, geometry, cfg, phi);
-    Aecho = analyticalEchoWidth(cfg, phi, cfg.N, caseID);
+    Aecho = analyticalEchoWidth(cfg, phi, 50, caseID);
     plotEcho(phi, echo, Aecho);
     error = sqrt(trapz(phi, (echo(:)-Aecho(:))).^2) ./ trapz(phi, Aecho(:));%rmse calculation
     monostatic = interp1(phi,echo,pi);%monostatic echo width
@@ -54,50 +54,49 @@ function geom = makeCircleGeometry(a,N)
 end
 
 function [G, D] = greenStart(x0, y0, geometry, k)
-DX = x0(:) - geometry.xmid.';
+DX = x0(:) - geometry.xmid.'; 
 DY = y0(:) - geometry.ymid.';
-R = hypot(DX, DY);
+R = hypot(DX, DY); %distance from observation point to segment midpoint
 G = (geometry.length.'/(4j)) .* besselh(0, 2, k*R); %green's fn at zero, bessel function is of 2nd kind
-D = (k*geometry.length.'/(4j)) .* besselh(1, 2, k*R) .* (geometry.nx.' .* DX + geometry.ny.' .*DY) ./ R; %dirac zero
+D = (k*geometry.length.'/(4j)) .* besselh(1, 2, k*R) .* (geometry.nx.' .* DX + geometry.ny.' .*DY) ./ R; %normal derivative of G
 end
 
-function [G, D] = createGreens(geometry, k)
+function [G, D] = createGreens(geometry, k) %make interaction matricies
     [G, D] = greenStart(geometry.xmid, geometry.ymid, geometry, k);
-    gamma = exp(0.577);
-    d = 1:geometry.N+1:geometry.N^2;
+    gamma = exp(0.577); %constant
+    d = 1:geometry.N+1:geometry.N^2; %diagonal
     G(d) = geometry.length/(4j) .* (1 - 1j*(2/pi)*log(gamma*k*geometry.length/(4*exp(1))));
     D(d) = 0;
 end
 
-function solution = MoM(geometry, cfg, caseID)
+function solution = MoM(geometry, cfg, caseID) %solves boundary integral equations
     N = geometry.N;
     I = eye(N); %identity matrix
     Einc = exp(-1j*cfg.k0*geometry.xmid); %incident field of all midpoints
-    beta = 1;
-    if caseID == 2 || caseID == 4 %checks if TE
-        beta = cfg.eR;
-    end
     [G, D] = createGreens(geometry, cfg.k0);
     if caseID == 1 || caseID == 2 %checks if PEC
         if caseID == 1 || caseID == 3 %checks if TM
-            q = G \ Einc;
+            q = G \ Einc; %dEz/dn
             E = zeros(N,1);
         else
             E = (0.5*I - D) \ Einc;
             q = zeros(N,1);
         end
     end
+    er = 1;
+    if caseID == 2 || caseID == 4
+        er = 9;
+    end
     A = [0.5*I - D, G;
-        0.5*I + D, -beta.*G];
+        0.5*I + D, -er.*G];
     x = A \ [Einc; zeros(N,1)];
     E = x(1:N);
     q = x(N+1:end);
     %wrap outputs
     solution.E = E;
     solution.q = q;
-    solution.beta = beta;
-    %define surface currents
-    if caseID == 1 || caseID == 3
+    %define surface currents - current-ly useless
+    if caseID == 1 || caseID == 3 %checks TM
         solution.J_z = q / (1j*cfg.k0*cfg.eta0);
     end
     if caseID == 2 || caseID == 4
@@ -106,16 +105,16 @@ function solution = MoM(geometry, cfg, caseID)
 end
 
 function echo = solveEchoWidth(solution, geometry, cfg, phi)
-cs = cos(phi(:)).';
-ss = sin(phi(:)).';
-nr = geometry.nx*cs + geometry.ny*ss; %phases needed
-phase = exp(1j*cfg.k0*(geometry.xmid*cs + geometry.ymid*ss));
-F = sum(geometry.length .* (solution.q - 1j*nr .* solution.E) .* phase, 1);
-echo = abs(F) .^2 / (4*cfg.k0);
+    cs = cos(phi(:)).';
+    ss = sin(phi(:)).';
+    nr = geometry.nx*cs + geometry.ny*ss; %phases needed
+    phase = exp(1j*cfg.k0*(geometry.xmid*cs + geometry.ymid*ss));
+    F = sum(geometry.length .* (solution.q - 1j*nr*cfg.k0 .* solution.E) .* phase, 1);
+    echo = abs(F) .^2 / (4*cfg.k0);
 end
 
-function aEcho = analyticalEchoWidth(cfg, phi, N, caseID) %N may be wrong
-    n = -N:N;
+function aEcho = analyticalEchoWidth(cfg, phi, Nh, caseID) %N may be wrong
+    n = -Nh:Nh;
     x = cfg.k0*cfg.a;
     J = besselj(n,x);
     H = besselh(n, 2, x);
@@ -137,9 +136,7 @@ function aEcho = analyticalEchoWidth(cfg, phi, N, caseID) %N may be wrong
         end
         coeffM = -(Js .* Jd - es*J.*Jds) ./ (Hs.*Jd - es*H.*Jds);
     end
-    %aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
-    S = exp(1j*phi(:)*n) * coeffM.';
-    aEcho = (4/cfg.k0) * abs(phi);
+    aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
 end
 
 function field = nearField(solution, geometry, cfg, caseID)
@@ -147,17 +144,36 @@ function field = nearField(solution, geometry, cfg, caseID)
     [X, Y] = meshgrid(x,x);
     Einc = exp(-1j*cfg.k0*X);
     Escat = zeros(size(X));
-    Etot = Escat;
-    in = inpolygon(X,Y, geometry.xv, geometry.yv) %returns in or on if in or on edge of polygon
+    Etot = zeros(size(X));
+    [in, on] = inpolygon(X,Y, geometry.xv, geometry.yv); %returns in or on if in or on edge of polygon
     out = ~in;
-    if caseID == 1 || caseID == 3 %check TM
-        wavenum = cfg.kd;
-    else
-        wavenum = cfg.k0;
+    %on boundary handling
+    in_boundary = in & ~on; %case for R=0 on boundary contour
+    N = numel(geometry.xmid); %number of array elements
+    Eb = zeros(N,1);
+    qb = zeros(N,1);
+    if isfield(solution, 'E') && ~isempty(solution.E)
+        Eb = solution.E; 
     end
-    [G0, D0] = greenStart(X(out), Y(out), geometry, wavenum);
+    if isfield(solution, 'q') && ~isempty(solution.q)
+        qb = solution.q; 
+    end  %checks if valid field array
+    %exterior
+    [G0, D0] = greenStart(X(out), Y(out), geometry, cfg.k0);
     Escat(out) = -(G0 * solution.q - D0 * solution.E);
     Etot(out) = Einc(out) + Escat(out);
+    if caseID >= 3 %check Dielectric
+        [Gd, Dd] = greenStart(X(in_boundary), Y(in_boundary), geometry, cfg.kd);
+        Etot(in_boundary)  = cfg.eR * 3 * (Gd * qb) - (Dd * Eb);
+        Escat(in_boundary) = Etot(in_boundary) - Einc(in_boundary);
+    else
+        Etot(in) = 0;
+        Escat(in) = -Einc(in);
+    end
+    field.X = X;
+    field.Y = Y;
+    field.Einc = Einc;
+    field.Escat = Escat;
     field.Et = Etot;
 end
 
