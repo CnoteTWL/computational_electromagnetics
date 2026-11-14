@@ -4,7 +4,6 @@ cfg = setupParameters();
 phi = (0:0.1:359.9) * pi/180; %every angle sweep
 % 1 = PEC TMz, 2 = PEC TEz, 3 = dielectric TMz, 4 = dielectric TEz
 for caseID = 1:4
-%caseID = 3;
     geometry = makeCircleGeometry(cfg.a, cfg.N);
     solution = MoM(geometry, cfg, caseID);
     fields = nearField(solution, geometry, cfg, caseID);
@@ -144,15 +143,15 @@ function field = nearField(solution, geometry, cfg, caseID)
     out = ~in;
     %on boundary handling
     in_boundary = in & ~on;
-    %N = numel(geometry.xmid); %number of array elements
-    % Eb = zeros(N,1);
-    % qb = zeros(N,1);
-    % if isfield(solution, 'E') && ~isempty(solution.E)
-    %     Eb = solution.E; 
-    % end
-    % if isfield(solution, 'q') && ~isempty(solution.q)
-    %     qb = solution.q; 
-    % end  %checks if valid field array
+    N = numel(geometry.xmid); %number of array elements
+    Eb = zeros(N,1);
+    qb = zeros(N,1);
+    if isfield(solution, 'E') && ~isempty(solution.E)
+        Eb = solution.E; 
+    end
+    if isfield(solution, 'q') && ~isempty(solution.q)
+        qb = solution.q; 
+    end  %checks if valid field array
     %exterior
     [G0, D0] = greenStart(X(out), Y(out), geometry, cfg.k0);
     Escat(out) = -(G0 * solution.q - D0 * solution.E);
@@ -165,8 +164,9 @@ function field = nearField(solution, geometry, cfg, caseID)
         else %TM
             Etot(in_boundary)  = ((Gd*solution.q) - (Dd*solution.E));
             Escat(in_boundary) = Etot(in_boundary) - Einc(in_boundary);
+            %Etot(on) = Eb; need to find better way to do this
         end
-        else
+    else
         Etot(in) = 0;
         Escat(in) = -Einc(in);
     end
@@ -176,6 +176,7 @@ function field = nearField(solution, geometry, cfg, caseID)
     field.Escat = Escat;
     field.Et = Etot;
 end
+
 
 function plotEcho(phi, echo, Aecho)
 figure;
