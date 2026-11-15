@@ -133,40 +133,6 @@ function aEcho = analyticalEchoWidth(cfg, phi, Nh, caseID) %N may be wrong
     aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
 end
 
-function field = nearField(solution, geometry, cfg, caseID)
-    x = linspace(-0.06, 0.06, 151);
-    [X, Y] = meshgrid(x,x);
-    Einc = exp(-1j*cfg.k0*X);
-    Escat = zeros(size(X));
-    Etot = zeros(size(X));
-    [in, on] = inpolygon(X,Y, geometry.xv, geometry.yv); %returns in or on if in or on edge of polygon
-    out = ~in;
-    %exterior
-    [G0, D0] = greenStart(X(out), Y(out), geometry, cfg.k0);
-    Escat(out) = -(G0 * solution.q - D0 * solution.E);
-    Etot(out) = Einc(out) + Escat(out);
-    if caseID >= 3 %check Dielectric
-        [Gd, Dd] = greenStart(X(in), Y(in), geometry, cfg.kd);
-        if caseID == 4 %TE
-            Etot(in)  = -(cfg.eR*(Gd*solution.q) - (Dd*solution.E)); %
-            Escat(in) = Etot(in) - Einc(in);
-        else %TM
-            Etot(in)  = -((Gd*solution.q) - (Dd*solution.E));
-            Escat(in) = Etot(in) - Einc(in);
-            %Etot(on) = Eb; need to find better way to do this
-        end
-        Etot(on) = (Etot(in)+Etot(out))/2;
-    else
-        Etot(in) = 0;
-        Escat(in) = -Einc(in);
-    end
-    field.X = X;
-    field.Y = Y;
-    field.Einc = Einc;
-    field.Escat = Escat;
-    field.Et = Etot;
-end
-
 
 function plotEcho(phi, echo, Aecho)
 figure;
@@ -187,8 +153,8 @@ function plotFields(cfg, fields, caseID)
     xlabel('x (m)'); ylabel('y (m)');
     title('Field Magnitude');
     if caseID == 1 || caseID == 3
-        cb.Label.String = 'Re(E_z) [V/m]';
+        cb.Label.String = 'E_z [V/m]';
     else
-        cb.Label.String = 'Re(H_z) [A/m]';
+        cb.Label.String = 'H_z [A/m]';
     end
 end
