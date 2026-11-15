@@ -141,31 +141,21 @@ function field = nearField(solution, geometry, cfg, caseID)
     Etot = zeros(size(X));
     [in, on] = inpolygon(X,Y, geometry.xv, geometry.yv); %returns in or on if in or on edge of polygon
     out = ~in;
-    %on boundary handling
-    in_boundary = in & ~on;
-    N = numel(geometry.xmid); %number of array elements
-    Eb = zeros(N,1);
-    qb = zeros(N,1);
-    if isfield(solution, 'E') && ~isempty(solution.E)
-        Eb = solution.E; 
-    end
-    if isfield(solution, 'q') && ~isempty(solution.q)
-        qb = solution.q; 
-    end  %checks if valid field array
     %exterior
     [G0, D0] = greenStart(X(out), Y(out), geometry, cfg.k0);
     Escat(out) = -(G0 * solution.q - D0 * solution.E);
     Etot(out) = Einc(out) + Escat(out);
     if caseID >= 3 %check Dielectric
-        [Gd, Dd] = greenStart(X(in_boundary), Y(in_boundary), geometry, cfg.kd);
+        [Gd, Dd] = greenStart(X(in), Y(in), geometry, cfg.kd);
         if caseID == 4 %TE
-            Etot(in_boundary)  = -(cfg.eR*(Gd*solution.q) + (Dd*solution.E));
-            Escat(in_boundary) = Etot(in_boundary) - Einc(in_boundary);
+            Etot(in)  = -(cfg.eR*(Gd*solution.q) - (Dd*solution.E)); %
+            Escat(in) = Etot(in) - Einc(in);
         else %TM
-            Etot(in_boundary)  = ((Gd*solution.q) - (Dd*solution.E));
-            Escat(in_boundary) = Etot(in_boundary) - Einc(in_boundary);
+            Etot(in)  = -((Gd*solution.q) - (Dd*solution.E));
+            Escat(in) = Etot(in) - Einc(in);
             %Etot(on) = Eb; need to find better way to do this
         end
+        Etot(on) = (Etot(in)+Etot(out))/2;
     else
         Etot(in) = 0;
         Escat(in) = -Einc(in);
