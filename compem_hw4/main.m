@@ -1,5 +1,4 @@
 close all; clear all; clc;
-%currently 2 works
 cfg = setupParameters();
 phi = (0:0.1:359.9) * pi/180; %every angle sweep
 % 1 = PEC TMz, 2 = PEC TEz, 3 = dielectric TMz, 4 = dielectric TEz
@@ -8,13 +7,22 @@ for caseID = 1:4
     solution = MoM(geometry, cfg, caseID);
     fields = nearField(solution, geometry, cfg, caseID);
     plotFields(cfg, fields, caseID);
-    echo = solveEchoWidth(solution, geometry, cfg, phi);
-    Aecho = analyticalEchoWidth(cfg, phi, 50, caseID);
-    plotEcho(phi, echo, Aecho);
+    echo  = solveEchoWidth(solution, geometry, cfg, phi);
+    Aecho = analyticalEchoWidth(cfg, phi, cfg.numharmonics, caseID);
+    [rmse(caseID), nrmse(caseID)] = computeRMSE(phi, echo, Aecho);
+    [monoMoM(caseID), monoAnalytic(caseID)] = monostaticEchoWidth(solution, geometry, cfg, caseID);
+    plotEcho(phi, echo, Aecho, monoMoM(caseID));
     error = sqrt(trapz(phi, (echo(:)-Aecho(:))).^2) ./ trapz(phi, Aecho(:));%rmse calculation
-    monostatic = interp1(phi,echo,pi);%monostatic echo width
 end
+%add rmse over radius and frequency R-a/L
+caseNames = {'PEC TMz','PEC TEz','Dielectric TMz','Dielectric TEz'};
 
+fprintf('\n%-16s %12s %10s %16s %18s\n', ...
+    'Case', 'RMSE (m)', 'NRMSE', 'Mono MoM (m)', 'Mono Analytic (m)');
+for c = 1:4
+    fprintf('%-16s %12.4e %10.4f %16.4e %18.4e\n', ...
+        caseNames{c}, rmse(c), nrmse(c), monoMoM(c), monoAnalytic(c));
+end
 
 function cfg = setupParameters()
     cfg.f0 = 10e9;
@@ -30,7 +38,6 @@ function cfg = setupParameters()
     cfg.k0 = 2*pi/cfg.lambda0;
     cfg.kd = 2*pi/cfg.lambdaD;
     cfg.R = cfg.a+cfg.lambda0;
-    cfg.circumference = pi*cfg.lambda0;
     cfg.N = 400;
     cfg.numharmonics = 50;
     cfg.phi = linspace(0,2*pi,361);
@@ -79,10 +86,10 @@ function solution = MoM(geometry, cfg, caseID) %solves boundary integral equatio
     [G, D] = createGreens(geometry, cfg.k0);
     if caseID == 1 || caseID == 2 %checks if PEC
         if caseID == 1 || caseID == 3 %checks if TM
-            q = G \ Einc; %dUz/dn
+            q = G \ Einc; %dUz/dn, EFIE
             E = zeros(N,1);
         else
-            E = (0.5*I - D) \ Einc;
+            E = (0.5*I - D) \ Einc; %MFIE
             q = zeros(N,1);
         end
     else
@@ -167,15 +174,15 @@ function aEcho = analyticalEchoWidth(cfg, phi, Nh, caseID) %N may be wrong
     aEcho = (4/cfg.k0) * abs((exp(1j*phi(:)*n) * coeffM.').').^2;
 end
 
-
-function plotEcho(phi, echo, Aecho)
-figure;
-plot(phi(:)*180/pi, echo, 'b-', phi(:)*180/pi, Aecho, 'r--');
-xlabel('\phi (deg)'); 
-ylabel('Echo width (m)');
-legend('MoM', 'Analytical'); 
-title('Bistatic Echo Width')
-grid on;
+function plotEcho(phi, echo, Aecho, monoMoM)
+    figure;
+    plot(phi(:)*180/pi, echo, 'b-', phi(:)*180/pi, Aecho, 'r--'); hold on;
+    plot(180, monoMoM, 'ko', 'MarkerFaceColor', 'k');   % phi = 180 deg
+    xlabel('\phi (deg)');
+    ylabel('Echo width (m)');
+    legend('MoM', 'Analytical', 'Monostatic (\phi = 180°)');
+    title('Bistatic Echo Width');
+    grid on;
 end
 
 function plotFields(cfg, fields, caseID)
@@ -191,4 +198,19 @@ function plotFields(cfg, fields, caseID)
     else
         cb.Label.String = 'H_z [A/m]';
     end
+end
+
+function [rmse, nrmse] = computeRMSE(phi, echo, Aecho)
+phi   = phi(:);
+echo  = echo(:);
+Aecho = Aecho(:);
+err2  = (echo - Aecho).^2;
+rmse  = sqrt(trapz(phi, err2) / (phi(end) - phi(1))); %meters
+nrmse = sqrt(trapz(phi, err2) / trapz(phi, Aecho.^2)); %normalized
+end
+
+function [sigmaMoM, sigmaAnalytic] = monostaticEchoWidth(solution, geometry, cfg, caseID)
+phiMono       = pi;
+sigmaMoM      = solveEchoWidth(solution, geometry, cfg, phiMono);
+sigmaAnalytic = analyticalEchoWidth(cfg, phiMono, cfg.numharmonics, caseID);
 end
