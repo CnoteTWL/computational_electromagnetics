@@ -53,7 +53,7 @@ function geom = makeCircleGeometry(a,N)
 end
 
 function [G, D] = greenStart(x0, y0, geometry, k)
-DX = x0(:) - geometry.xmid.'; 
+DX = x0(:) - geometry.xmid.'; %apply weights
 DY = y0(:) - geometry.ymid.';
 R = hypot(DX, DY); %distance from observation point to segment midpoint
 G = (geometry.length.'/(4j)) .* besselh(0, 2, k*R); %green's fn at zero, bessel function is of 2nd kind
@@ -96,6 +96,40 @@ function solution = MoM(geometry, cfg, caseID) %solves boundary integral equatio
     %wrap outputs
     solution.E = E;
     solution.q = q;
+end
+
+function field = nearField(solution, geometry, cfg, caseID)
+x = linspace(-0.06, 0.06, 151);
+[X, Y] = meshgrid(x,x);
+Einc = exp(-1j*cfg.k0*X);
+Escat = zeros(size(X));
+Etot = zeros(size(X));
+[in, on] = inpolygon(X,Y, geometry.xv, geometry.yv); %returns in or on if in or on edge of polygon
+out = ~in;
+%on boundary handling
+in_boundary = in; %case for R=0 on boundary contour
+%exterior
+[G0, D0] = greenStart(X(out), Y(out), geometry, cfg.k0);
+Escat(out) = -(G0 * solution.q - D0 * solution.E);
+Etot(out) = Einc(out) + Escat(out);
+if caseID >= 3 %check Dielectric
+    [Gd, Dd] = greenStart(X(in_boundary), Y(in_boundary), geometry, cfg.kd);
+    if caseID == 4 %TE
+        Etot(in_boundary)  = -(cfg.eR*(Gd*solution.q) - (Dd*solution.E));
+        Escat(in_boundary) = Etot(in_boundary) - Einc(in_boundary);
+    else %TM
+        Etot(in_boundary)  = -((Gd*solution.q) - (Dd*solution.E));
+        Escat(in_boundary) = Etot(in_boundary) - Einc(in_boundary);
+    end
+else
+    Etot(in) = 0;
+    Escat(in) = -Einc(in);
+end
+field.X = X;
+field.Y = Y;
+field.Einc = Einc;
+field.Escat = Escat;
+field.Et = Etot;
 end
 
 function echo = solveEchoWidth(solution, geometry, cfg, phi)
